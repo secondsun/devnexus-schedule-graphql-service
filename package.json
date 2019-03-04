@@ -1,0 +1,18 @@
+{
+  "name": "devnexus-schedule-graphql-service",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@aerogear/voyager-keycloak": "^0.5.0",
+    "@aerogear/voyager-server": "^0.5.0",
+    "express": "^4.16.4",
+    "graphql": "^14.1.1",
+    "graphql-tools": "^4.0.4"
+  }
+}
