@@ -1,8 +1,14 @@
 const fs = require('fs')
 const path = require('path')
 const express = require('express')
-
+const { KeycloakSecurityService } = require('@aerogear/voyager-keycloak')
+const cors = require('cors')
+const keycloakConfigPath = process.env.KEYCLOAK_CONFIG || path.resolve(__dirname, './config/keycloak.json')
+const keycloakConfig = JSON.parse(fs.readFileSync(keycloakConfigPath))
 const { VoyagerServer, gql } = require('@aerogear/voyager-server')
+
+var data = {
+};
 
 // This is our Schema Definition Language (SDL)
 const typeDefs = gql`
@@ -11,7 +17,6 @@ const typeDefs = gql`
     sessionName: String!
     comment: String!
     score: Int!
-    user: User!
   }
 
   type User {
@@ -45,7 +50,18 @@ input FeedbackInput {
 const resolvers = {
   Query: {
     me: (obj, args, context, info) => {
-      return {"displayName":"Summers Hello World","email":"test@test.com"};
+      console.log(context.auth.isAuthenticated())
+      console.log(context.auth.accessToken.content)
+      
+      if (!data[context.auth.accessToken.content.email]) {
+        data[context.auth.accessToken.content.email] = {
+          displayName: context.auth.accessToken.content.name,
+          email: context.auth.accessToken.content.email,
+          feedback: {}
+        }
+      }
+      console.log(data);
+      return data[context.auth.accessToken.content.email];
     }
   },
   Mutation: {
@@ -53,13 +69,23 @@ const resolvers = {
       return {"displayName":"Summers Hello World","email":"test@test.com"};
     },
     postFeedback: (obj, args, context, info) => {
-      return {"comment":"This is a test comment", "score":5, "sessionName":"This is a test session", "user":{"displayName":"Summers Hello World","email":"test@test.com"}};
+      const {email}  = context.auth.accessToken.content;
+      const {sessionName, comment, score} = args.feedback
+      console.log(args);
+
+      data[email].feedback[sessionName] = {
+        comment: comment,
+        score: score,
+        sessionName:sessionName
+      }
+
+      return data[email].feedback[sessionName];
     }
   }
 }
 
 // Initialize the keycloak service
-//const keycloakService = new KeycloakSecurityService(keycloakConfig)
+const keycloakService = new KeycloakSecurityService(keycloakConfig)
 
 // The context is a function or object that can add some extra data
 // That will be available via the `context` argument the resolver functions
@@ -72,24 +98,25 @@ const context = ({ req }) => {
 // Initialize the voyager server with our schema and context
 
 const apolloConfig = {
-  typeDefs: [typeDefs],
+  typeDefs: [typeDefs, keycloakService.getTypeDefs()],
   resolvers,
   context
 }
 
 const voyagerConfig = {
+  securityService: keycloakService
 }
 
 const server = VoyagerServer(apolloConfig, voyagerConfig)
 
 const app = express()
-
+app.use(cors())
 // Apply the keycloak middleware to the express app.
 // It's very important this is done before
 // Applying the apollo middleware
 // This function can also take an `options` argument
 // To specify things like apiPath and tokenEndpoint
-//keycloakService.applyAuthMiddleware(app, { tokenEndpoint: true })
+keycloakService.applyAuthMiddleware(app, { tokenEndpoint: true })
 server.applyMiddleware({ app })
 
 module.exports = { app, server }
