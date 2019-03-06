@@ -1,0 +1,8 @@
+{
+    "realm": "devnexus-mobile",
+    "auth-server-url": "https://keycloak-route-devnexus-mobile.apps.atlanta-69c6.openshiftworkshop.com/auth",
+    "ssl-required": "external",
+    "resource": "devnexus-client-public",
+    "public-client": true,
+    "confidential-port": 0
+  }

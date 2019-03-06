@@ -1,3 +1,5 @@
+const { subscriptionServer } = require('./subscriptions')
+const http = require('http')
 const fs = require('fs')
 const path = require('path')
 const express = require('express')
@@ -6,6 +8,9 @@ const cors = require('cors')
 const keycloakConfigPath = process.env.KEYCLOAK_CONFIG || path.resolve(__dirname, './config/keycloak.json')
 const keycloakConfig = JSON.parse(fs.readFileSync(keycloakConfigPath))
 const { VoyagerServer, gql } = require('@aerogear/voyager-server')
+const { PubSub, withFilter } = require('apollo-server');
+
+const pubsub = new PubSub();
 
 var data = {
 };
@@ -22,6 +27,7 @@ const typeDefs = gql`
   type User {
     displayName: String!
     email: String!
+    feedback: [Feedback!]!
   }
 
   input UserInput {
@@ -44,14 +50,16 @@ input FeedbackInput {
     postFeedback(feedback : FeedbackInput!) : Feedback!
   }
 
+  type Subscription {
+    userActivity : User!
+  }
+
 `
 
 // Resolver functions. This is our business logic
 const resolvers = {
   Query: {
     me: (obj, args, context, info) => {
-      console.log(context.auth.isAuthenticated())
-      console.log(context.auth.accessToken.content)
       
       if (!data[context.auth.accessToken.content.email]) {
         data[context.auth.accessToken.content.email] = {
@@ -60,8 +68,13 @@ const resolvers = {
           feedback: {}
         }
       }
-      console.log(data);
-      return data[context.auth.accessToken.content.email];
+      
+      var user = {};
+      user.displayName = data[context.auth.accessToken.content.email].displayName;
+      user.email = data[context.auth.accessToken.content.email].email;
+      user.feedback = Object.values(data[context.auth.accessToken.content.email].feedback);
+
+      return user;
     }
   },
   Mutation: {
@@ -71,15 +84,36 @@ const resolvers = {
     postFeedback: (obj, args, context, info) => {
       const {email}  = context.auth.accessToken.content;
       const {sessionName, comment, score} = args.feedback
-      console.log(args);
-
+      
       data[email].feedback[sessionName] = {
         comment: comment,
         score: score,
         sessionName:sessionName
       }
 
+      var user = {};
+      user.displayName = data[context.auth.accessToken.content.email].displayName;
+      user.email = data[context.auth.accessToken.content.email].email;
+      user.feedback = Object.values(data[context.auth.accessToken.content.email].feedback);
+
+      pubsub.publish('USER_ACTIVITY', { userActivity: user });
       return data[email].feedback[sessionName];
+    }
+  },
+
+  Subscription: {
+    userActivity: {
+      subscribe: withFilter(
+        () => pubsub.asyncIterator('USER_ACTIVITY'),
+        (payload, variables, context) => {
+          console.log("payload")
+          console.log(payload)
+          if (!payload) {
+            return false;
+          }
+         return payload.userActivity.email === context.auth.email;
+        },
+      ),
     }
   }
 }
@@ -107,9 +141,9 @@ const voyagerConfig = {
   securityService: keycloakService
 }
 
-const server = VoyagerServer(apolloConfig, voyagerConfig)
 
 const app = express()
+const httpServer = http.createServer(app)
 app.use(cors())
 // Apply the keycloak middleware to the express app.
 // It's very important this is done before
@@ -117,6 +151,18 @@ app.use(cors())
 // This function can also take an `options` argument
 // To specify things like apiPath and tokenEndpoint
 keycloakService.applyAuthMiddleware(app, { tokenEndpoint: true })
-server.applyMiddleware({ app })
 
-module.exports = { app, server }
+
+const apolloServer = VoyagerServer(apolloConfig, voyagerConfig)
+
+  apolloServer.applyMiddleware({
+    app
+  })
+  httpServer.listen({
+    port: 4000
+  }, () => {
+    console.log(`🚀  Server ready at http://localhost:4000/graphql`)
+    subscriptionServer(keycloakService, httpServer, apolloServer)
+  })
+
+module.exports = { app, httpServer,  apolloServer}
